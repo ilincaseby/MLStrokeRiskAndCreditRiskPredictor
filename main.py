@@ -10,6 +10,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.neural_network import MLPClassifier
+from mlp import mlp_predict
 
 avc_cont_num_attrs = ['mean_blood_sugar_level', 'body_mass_indicator',\
                       'analysis_results', 'biological_age_index']
@@ -40,11 +41,13 @@ def discret_extraction(data_frame: pd.DataFrame, discret_attrs: list, dataset: s
         attr_unique_count = attr_series.nunique()
         attr_dict = {'No empty values': attr_filled, 'Number of unique values': attr_unique_count}
         data_extracted[attr] = attr_dict
-    data_frame_on_extracted = pd.DataFrame(data_extracted)
-    data_frame_on_extracted.to_csv(dataset + '_on_discret_or_cat_values.csv', index=False)
-    data_frame_on_extracted.hist(width=0.5)
-    plt.savefig(dataset + '_histogram.png')
-    plt.close()
+        attr_series.hist(width=0.5)
+        plt.subplots_adjust(bottom=0.25)
+        plt.xticks(rotation=45, fontsize=7)
+        plt.savefig(dataset + '_hist_on_' + attr + '.png')
+        plt.close()
+    with open(dataset + '_on_discret_numeric_values.txt', 'w') as f:
+        f.write(str(data_extracted))
 
 def numeric_extraction(data_frame: pd.DataFrame, cont_num_attrs: list, dataset: str):
     data_extracted = {}
@@ -63,11 +66,13 @@ def numeric_extraction(data_frame: pd.DataFrame, cont_num_attrs: list, dataset: 
                         'Quantile 25%': attr_quantile_25, 'Quantile 50%': attr_quantile_50, \
                             'Quantile 75%': attr_quantile_75, 'Max value': attr_max}
         data_extracted[attr] = attr_dict
-        plt.plot(attr_series)
-        plt.savefig(dataset + '_plot_on_' + attr + '.png')
-        plt.close()
-    data_frame_on_extracted = pd.DataFrame(data_extracted)
-    data_frame_on_extracted.to_csv(dataset + '_on_continuous_numeric_values.csv', index=False)
+    df_plot = data_frame[cont_num_attrs]
+    ax = df_plot.plot.box()
+    plt.xticks(rotation=0, fontsize=7)
+    plt.savefig(dataset + '_plot_box.png')
+    plt.close()
+    with open(dataset + '_on_continuous_numeric_values.txt', 'w') as f:
+        f.write(str(data_extracted))
 
 def countplot(data_frame: pd.DataFrame, dataset: str):
     data_extracted_col = []
@@ -79,6 +84,8 @@ def countplot(data_frame: pd.DataFrame, dataset: str):
         data_extracted_count.append(attr_filled)
     df = pd.DataFrame({'Attributes': data_extracted_col, 'Frequency': data_extracted_count})
     ax = df.plot.bar(x='Attributes', y='Frequency', rot=0)
+    plt.subplots_adjust(bottom=0.4)
+    plt.xticks(rotation=45)
     fig = ax.get_figure()
     fig.savefig(dataset + '_bar_plot.png')
 
@@ -86,6 +93,7 @@ def correlation_analysis_cont(data_frame: pd.DataFrame, list_attr: list, dataset
     new_data_frame = data_frame[list_attr]
     corr_matrix = new_data_frame.corr(method='pearson').values
     fig = plt.figure(figsize=(2*len(list_attr), 2*len(list_attr)))
+    plt.subplots_adjust(left=0.25, bottom=0.05)
     ax = fig.add_subplot(111)
     # Normalise data with vmin and vmax
     cax = ax.matshow(corr_matrix, vmin=-1, vmax=1)
@@ -100,6 +108,7 @@ def correlation_analysis_cont(data_frame: pd.DataFrame, list_attr: list, dataset
     ax.set_xticklabels(list_attr, rotation=45)
     ax.set_yticklabels(list_attr, rotation=45)
     fig.savefig(dataset + '_corr_matrix.png')
+    plt.close()
 
 def correlation_analysis_categ(data_frame: pd.DataFrame, list_attr: list, dataset: str):
     correlation_matrix = pd.DataFrame(index=list_attr, columns=list_attr)
@@ -123,6 +132,7 @@ def correlation_analysis_categ(data_frame: pd.DataFrame, list_attr: list, datase
     ax.set_xticklabels(list_attr, rotation=45)
     ax.set_yticklabels(list_attr, rotation=45)
     fig.savefig(dataset + '_corr_matrix_on_categ.png')
+    plt.close()
 
 def imputer_on_cont_discret_categ(data_frame: pd.DataFrame, list_attr_cont: list,\
                                   list_attr_disc_and_categ: list):
@@ -140,12 +150,12 @@ def no_extreme_values(data_frame: pd.DataFrame, list_attr_cont: list, list_attr_
         attr_quantile_10 = attr_series.quantile(0.10)
         outliers = (data_frame[attr] < attr_quantile_10) | (data_frame[attr] > attr_quantile_90)
         data_frame.loc[outliers, attr] = np.nan
-    # for attr in list_attr_disc:
-    #     attr_series = data_frame[attr]
-    #     attr_quantile_90 = attr_series.quantile(0.90)
-    #     attr_quantile_10 = attr_series.quantile(0.10)
-    #     outliers = (data_frame[attr] < attr_quantile_10) | (data_frame[attr] > attr_quantile_90)
-    #     data_frame.loc[outliers, attr] = np.nan
+    for attr in list_attr_disc:
+        attr_series = data_frame[attr]
+        attr_quantile_90 = attr_series.quantile(0.90)
+        attr_quantile_10 = attr_series.quantile(0.10)
+        outliers = (data_frame[attr] < attr_quantile_10) | (data_frame[attr] > attr_quantile_90)
+        data_frame.loc[outliers, attr] = np.nan
     return data_frame
 
 def standard_scaler(data_frame: pd.DataFrame, list_attr: list):
@@ -292,15 +302,61 @@ def logistic_prediction(data_frame: pd.DataFrame, data_frame_test: pd.DataFrame,
     f1_score_rl = 2 * precision_rl * recall_rl / denom_f1 if denom_f1 != 0 else 0
     print(f'Accuracy: {accuracy_rl}, Precision: {precision_rl}, Recall: {recall_rl}, F1_score: {f1_score_rl}')
 
+def accuracy_mlp(y: np.ndarray, t: np.ndarray) -> float:
+    a = np.argmax(y, axis=1) == t
+    sum = 0
+    for i in range(len(a)):
+        sum += a[i]
+    return sum / len(a)
+
+def do_mlp_predict(data_frame: pd.DataFrame, data_frame_test: pd.DataFrame, target:str, topic:str):
+    x_train = data_frame.drop(target, axis=1)
+    y_train = data_frame[target]
+    x_test = data_frame_test.drop(target, axis=1)
+    y_test = data_frame_test[target]
+    x_train, x_test = x_train.align(x_test, join='inner', axis=1)
+    # X_train_np = x_train.values
+    X_train_np = np.array([[int(val) if isinstance(val, bool) else val for val in row] for row in x_train.values])
+    X_train_np = np.concatenate([X_train_np, np.ones((X_train_np.shape[0], 1))], axis=1)
+    Y_train_np = y_train.values
+    X_test_np = np.array([[int(val) if isinstance(val, bool) else val for val in row] for row in x_test.values])
+    X_test_np = np.concatenate([X_test_np, np.ones((X_test_np.shape[0], 1))], axis=1)
+    Y_test_np = y_test.values
+    num_rows, num_cols = X_train_np.shape
+    hidden_units = num_cols / 2
+    batch_size = 10
+    ephocs_no = 30
+
+    Y = mlp_predict(num_cols, int(hidden_units), batch_size, ephocs_no, X_train_np, Y_train_np, X_test_np)
+    accuracy = accuracy_mlp(Y, Y_test_np)
+    array_0 = np.zeros(len(Y), dtype=int)
+    array_1 = np.ones(len(Y), dtype=int)
+    predicted_0 = np.argmax(Y, axis=1) == array_0
+    predicted_1 = np.argmax(Y, axis=1) == array_1
+    true_pos = 0
+    false_pos = 0
+    false_neg = 0
+    for i in range(len(predicted_0)):
+        if predicted_1[i] == True and Y_test_np[i] == 1:
+            true_pos += 1
+        if predicted_1[i] == True and Y_test_np[i] == 0:
+            false_pos += 1
+        if predicted_0[i] == True and Y_test_np[i] == 1:
+            false_neg += 1
+    precision = true_pos / (true_pos + false_pos) if true_pos + false_pos != 0 else 0
+    recall = true_pos / (true_pos + false_neg) if true_pos + false_neg != 0 else 0
+    f1_score = (2 * precision * recall) / (precision + recall) if precision + recall != 0 else 0
+    print(f'Using own implementation of MLP for {topic}, results have the following metrics')
+    print(f'Accuracy: {accuracy}, Precision: {precision}, Recall: {recall}, F1_score: {f1_score}')
 
 def avc_predict():
     data_frame = pd.read_csv('tema2_AVC/AVC_train.csv')
     data_frame_test = pd.read_csv('tema2_AVC/AVC_test.csv')
-    # numeric_extraction(data_frame, avc_cont_num_attrs, 'AVC')
-    # discret_extraction(data_frame, avc_discret, 'AVC')
-    # countplot(data_frame, 'AVC')
-    # correlation_analysis_cont(data_frame, avc_cont_num_attrs, 'AVC')
-    # correlation_analysis_categ(data_frame, avc_categ, 'AVC')
+    numeric_extraction(data_frame, avc_cont_num_attrs, 'AVC')
+    discret_extraction(data_frame, avc_discret, 'AVC')
+    countplot(data_frame, 'AVC')
+    correlation_analysis_cont(data_frame, avc_cont_num_attrs, 'AVC')
+    correlation_analysis_categ(data_frame, avc_categ, 'AVC')
     data_frame = no_extreme_values(data_frame, avc_cont_num_attrs, [elem for elem in avc_discret if\
                                                        elem not in avc_categ])
     data_frame = imputer_on_cont_discret_categ(data_frame, avc_cont_num_attrs, avc_discret)
@@ -323,15 +379,16 @@ def avc_predict():
     sk_logistic_regression(data_frame, data_frame_test, 'cerebrovascular_accident', 'AVC')
     mlp_predictions(data_frame, data_frame_test, 'cerebrovascular_accident', 'AVC')
     logistic_prediction(data_frame, data_frame_test, 'cerebrovascular_accident', 'AVC')
+    do_mlp_predict(data_frame, data_frame_test, 'cerebrovascular_accident', 'AVC')
 
 def salary_predict():
     data_frame = pd.read_csv('tema2_SalaryPrediction/SalaryPrediction_train.csv')
     data_frame_test = pd.read_csv('tema2_SalaryPrediction/SalaryPrediction_test.csv')
-    # numeric_extraction(data_frame, salary_prediction_num_attrs, 'SalaryPrediction')
-    # discret_extraction(data_frame, salary_prediction_discret, 'SalaryPrediction')
-    # countplot(data_frame, 'SalaryPrediction')
-    # correlation_analysis_cont(data_frame, salary_prediction_num_attrs, 'SalaryPrediction')
-    # correlation_analysis_categ(data_frame, salary_prediction_categ, 'SalaryPrediction')
+    numeric_extraction(data_frame, salary_prediction_num_attrs, 'SalaryPrediction')
+    discret_extraction(data_frame, salary_prediction_discret, 'SalaryPrediction')
+    countplot(data_frame, 'SalaryPrediction')
+    correlation_analysis_cont(data_frame, salary_prediction_num_attrs, 'SalaryPrediction')
+    correlation_analysis_categ(data_frame, salary_prediction_categ, 'SalaryPrediction')
     data_frame = no_extreme_values(data_frame, salary_prediction_num_attrs, [elem for elem in\
                                                                 salary_prediction_discret if elem\
                                                                 not in salary_prediction_categ])
@@ -357,6 +414,7 @@ def salary_predict():
     sk_logistic_regression(data_frame, data_frame_test, 'money', 'Salary Prediction')
     mlp_predictions(data_frame, data_frame_test, 'money', 'Salary Prediction')
     logistic_prediction(data_frame, data_frame_test, 'money', 'Salary')
+    do_mlp_predict(data_frame, data_frame_test, 'money', 'Salary Prediction')
 
 def main():
     avc_predict()
